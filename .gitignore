@@ -1,0 +1,35 @@
+# Entorno virtual
+venv/
+.env/
+.venv/
+env/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos de configuración local
+.env
+.env.local
+.env.dev
+.env.prod
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos de logs y bases de datos
+*.log
+*.sqlite3
+
+# Directorio de dependencias
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# no subir los archivos JSON creados de las tablas de siscont
+archivos_json/
