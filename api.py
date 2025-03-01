@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from os import getenv, path, makedirs
 from db.database import get_db_connection, get_db_cursor
+from db.models import ConexionParams
 import pyodbc
 import json
 from datetime import datetime
@@ -11,11 +12,6 @@ from pydantic import BaseModel
 
 # from db.models import ConexionParams
 from dotenv import load_dotenv
-
-
-class ConexionParams(BaseModel):
-    host: str
-
 
 app = FastAPI()
 
@@ -48,49 +44,6 @@ async def hello():
     return "Hello, fastapi"
 
 
-# # funcion que define la conexion a Siscont
-# def db_connect_siscont():
-#     db = {
-#         "server": "172.20.0.3",
-#         "port": "1433",
-#         "database": "S5Principal",
-#         "user": "sa",
-#         "password": "S5Principal",
-#     }
-#     # preparando la cadena de conexion haciendo uso del driver ODBC 17
-#     url_siscont = (
-#         f'DRIVER=ODBC Driver 17 for SQL SERVER;SERVER={db["server"]};PORT={db["port"]};DATABASE'
-#         f'={db["database"]};TDS_Version=8.0;UID={db["user"]};PWD={db["password"]}'
-#     )
-#     try:
-#         connect_siscont = pyodbc.connect(url_siscont)
-#         return connect_siscont
-#     except Exception as e:
-#         print("Error al crear conexion con sqlserver", e)
-
-
-# @app.get(
-#     "/conectar",
-#     tags=["Database"],
-#     summary="Prueba de conexion con la BD en el contenedor",
-# )
-# async def check_db_connection():
-#     try:
-#         conn = db_connect_siscont()
-#         if conn:
-#             conn.close()  # Cierra la conexión después de verificar
-#             return {
-#                 "status": "success",
-#                 "message": "Conexión a la base de datos establecida correctamente.",
-#             }
-#     except HTTPException as e:
-#         raise e
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500, detail=f"Error al conectar a la base de datos: {str(e)}"
-#         )
-
-
 # Endpoint para recibir los parametros del frontend quasar
 @app.post(
     "/conectar-params",
@@ -98,6 +51,7 @@ async def hello():
     summary="Obtiene la ip del servidor de la BD desde el frontend para conectar",
 )
 async def conectar_parametros(params: ConexionParams):
+    print(f"params: {params}")
     # url_siscont = (
     #     f"DRIVER=ODBC Driver 17 for SQL Server;"
     #     f"SERVER={params.host};"
@@ -110,7 +64,7 @@ async def conectar_parametros(params: ConexionParams):
     try:
         # Conecta a la base de datos con los parametros dinamicos
         # conn = pyodbc.connect(url_siscont)
-        conn = get_db_connection(params.host)
+        conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
         print("conn: ", conn)
         if not conn:
             raise HTTPException(
@@ -153,7 +107,7 @@ async def conectar_parametros(params: ConexionParams):
 async def get_tables(params: ConexionParams):
     """Retornando lista de los nombres de las tablas y el total de tablas"""
     # conn = get_db_connection()
-    conn = get_db_connection(params.host)
+    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 
@@ -189,7 +143,7 @@ async def get_tables(params: ConexionParams):
 )
 async def get_table_structure(table_name: str, params: ConexionParams):
     # conn = get_db_connection()
-    conn = get_db_connection(params.host)
+    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 
@@ -232,9 +186,9 @@ async def get_table_structure(table_name: str, params: ConexionParams):
     tags=["Database"],
     summary="Convierte la informacion de la tabla especificada a un archivo JSON",
 )
-async def get_table_structure(table_name: str, params: ConexionParams):
+async def get_table_data(table_name: str, params: ConexionParams):
     # conn = get_db_connection()
-    conn = get_db_connection(params.host)
+    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 

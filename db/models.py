@@ -3,10 +3,8 @@ from pydantic import BaseModel, field_validator
 
 class ConexionParams(BaseModel):
     host: str
-    # port: int
-    # database: str
-    # user: str
-    # password: str
+    database: str
+    password: str
 
     # @field_validator("port")
     # def port_must_be_valid_port(cls, v):

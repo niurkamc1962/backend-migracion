@@ -3,21 +3,21 @@ from dotenv import load_dotenv
 import pyodbc
 
 
-def get_db_connection(host: str):
+def get_db_connection(host: str, password: str, database: str, port:str, user: str):
     """Establece la conexion y retorna la conexion a la BD SQL Server"""
     load_dotenv(".env")
 
-    # SQL_HOST = getenv("SQL_HOST")
     SQL_USER = getenv("SQL_USER")
-    SQL_PASS = getenv("SQL_PASS")
     SQL_PORT = getenv("SQL_PORT")
-    SQL_DATABASE = getenv("SQL_DATABASE")
+    # SQL_HOST = getenv("SQL_HOST")
+    # SQL_PASS = getenv("SQL_PASS")
+    # SQL_DATABASE = getenv("SQL_DATABASE")
 
     # print(f"HOST: {SQL_HOST}")
-    print(f"HOST: { host}")
+    print(f"HOST: { host}, PASS: {password}, DATABASE: {database}")
 
     # asegurando que todas las variables de entorno estan definidas y no vacias
-    if not all([host, SQL_USER, SQL_PASS, SQL_PORT, SQL_DATABASE]):
+    if not all([host, database, password, SQL_USER, SQL_PORT ]):
         raise ValueError("Faltan variables de entorno por definir")
 
     # Preparando la cadena de conexion
@@ -25,9 +25,9 @@ def get_db_connection(host: str):
         f"DRIVER=ODBC Driver 17 for SQL Server;"
         f"SERVER={host};"
         f"PORT={SQL_PORT};"
-        f"DATABASE={SQL_DATABASE};"
+        f"DATABASE={database};"
         f"UID={SQL_USER};"
-        f"PWD={SQL_PASS};"
+        f"PWD={password};"
         f"Timeout=0"
     )
     print(f"URL_SISCONT: {url_siscont}")
