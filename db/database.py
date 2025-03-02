@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import pyodbc
 import pandas as pd
 
-
+# Funcion que prepara la cadena conexion con la BD
 def get_db_connection(host: str, password: str, database: str, port:str, user: str):
     """Establece la conexion y retorna la conexion a la BD SQL Server"""
     load_dotenv(".env")
@@ -15,7 +15,7 @@ def get_db_connection(host: str, password: str, database: str, port:str, user: s
     # SQL_DATABASE = getenv("SQL_DATABASE")
 
     # print(f"HOST: {SQL_HOST}")
-    print(f"HOST: { host}, PASS: {password}, DATABASE: {database}")
+    print(f"HOST: {host}, PASS: {password}, DATABASE: {database}")
 
     # asegurando que todas las variables de entorno estan definidas y no vacias
     if not all([host, database, password, SQL_USER, SQL_PORT ]):
@@ -43,7 +43,7 @@ def get_db_connection(host: str, password: str, database: str, port:str, user: s
         print(sqlstate)
         return None
 
-
+# Funcion para la conexion
 def get_db_cursor(conn):
     """Retorna un cursor para ejecutar consultas con la conexion dada"""
     if conn:
@@ -51,7 +51,9 @@ def get_db_cursor(conn):
     else:
         return None
     
-def obtener_relaciones(conn):
+
+# Funcion para obtener todas las tablas y sus relaciones
+def tables_relations(conn):
     """Ejecuta la consulta para obtener las relaciones entre tablas"""
     query = """
         SELECT 
@@ -66,5 +68,28 @@ def obtener_relaciones(conn):
     """
     
     df = pd.read_sql_query(query,conn)
+    relaciones = df.to_dict(orient='records')
+    return relaciones
+
+# Funcion que obtiene las tablas que se relacionan con la tabla especificada
+def table_relations(conn, table_name):
+    print(f"conn desde obtener relaciones: {conn}")
+    query = f"""
+        SELECT 
+            OBJECT_NAME(f.parent_object_id) AS tabla_padre,
+            COL_NAME(fc.parent_object_id, fc.parent_column_id) AS columna_padre,
+            OBJECT_NAME(f.referenced_object_id) AS tabla_hija,
+            COL_NAME(fc.referenced_object_id, fc.referenced_column_id) AS columna_hija
+        FROM 
+            sys.foreign_keys f
+        INNER JOIN 
+            sys.foreign_key_columns fc ON f.object_id = fc.constraint_object_id
+        WHERE 
+            OBJECT_NAME(f.parent_object_id) = '{table_name}'
+        OR 
+            OBJECT_NAME(f.referenced_object_id) = '{table_name}'
+    """
+    
+    df = pd.read_sql_query(query, conn)
     relaciones = df.to_dict(orient='records')
     return relaciones
