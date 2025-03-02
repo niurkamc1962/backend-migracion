@@ -1,6 +1,7 @@
 from os import getenv
 from dotenv import load_dotenv
 import pyodbc
+import pandas as pd
 
 
 def get_db_connection(host: str, password: str, database: str, port:str, user: str):
@@ -49,3 +50,21 @@ def get_db_cursor(conn):
         return conn.cursor()
     else:
         return None
+    
+def obtener_relaciones(conn):
+    """Ejecuta la consulta para obtener las relaciones entre tablas"""
+    query = """
+        SELECT 
+            OBJECT_NAME(f.parent_object_id) AS tabla_padre,
+            COL_NAME(fc.parent_object_id, fc.parent_column_id) AS columna_padre,
+            OBJECT_NAME(f.referenced_object_id) AS tabla_hija,
+            COL_NAME(fc.referenced_object_id, fc.referenced_column_id) AS columna_hija
+        FROM 
+            sys.foreign_keys f
+        INNER JOIN 
+            sys.foreign_key_columns fc ON f.object_id = fc.constraint_object_id
+    """
+    
+    df = pd.read_sql_query(query,conn)
+    relaciones = df.to_dict(orient='records')
+    return relaciones

@@ -2,13 +2,14 @@ from typing import List, Dict
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from os import getenv, path, makedirs
-from db.database import get_db_connection, get_db_cursor
+from db.database import get_db_connection, get_db_cursor, obtener_relaciones
 from db.models import ConexionParams
 import pyodbc
 import json
 from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel
+
 
 # from db.models import ConexionParams
 from dotenv import load_dotenv
@@ -37,6 +38,7 @@ def convert_custom_types(obj):
             "%Y-%m-%d %H:%M:%S"
         )  # convertir datetime a string en formato ISO 8601
     raise TypeError(f"Tipo no serializable {type(obj)}")
+
 
 
 @app.get("/", tags=["Root"])
@@ -238,3 +240,24 @@ async def get_table_data(table_name: str, params: ConexionParams):
     finally:
         cursor.close()
         conn.close()
+
+
+# Endpoint que obtiene las relaciones entre las tablas de una Base de datos
+@app.post(
+    "/relaciones_tablas",
+    tags=["Database"],
+    summary="Muestra las relaciones entre las tablas de la BD",
+    response_model=list[dict]
+)
+def relaciones_entre_tablas(params: ConexionParams):
+    # Obteniendo conexion con la base de datos
+    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
+
+    if conn:
+        # obteniendo las relaciones
+        print("Entre para obtener las relaciones")
+        relaciones = obtener_relaciones(conn)
+        print(f"realaciones: {relaciones}")
+        return relaciones
+    else:
+        return {"error": "No se pudo establecer conexion"}

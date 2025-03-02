@@ -6,8 +6,8 @@ class ConexionParams(BaseModel):
     database: str
     password: str
 
-    # @field_validator("port")
-    # def port_must_be_valid_port(cls, v):
-    #     if not (1 <= v <= 65535):
-    #         raise ValueError("Puerto tiene que estar entre 1 y 65535")
-    #     return v
+class Relacion(BaseModel):
+    tabla_padre: str
+    columna_padre: str
+    tabla_hija: str
+    columna_hija: str
