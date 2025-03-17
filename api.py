@@ -2,7 +2,12 @@ from typing import List, Dict
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from os import getenv, path, makedirs
-from db.database import get_db_connection, get_db_cursor, table_relations, tables_relations
+from db.database import (
+    get_db_connection,
+    get_db_cursor,
+    table_relations,
+    tables_relations,
+)
 from db.models import ConexionParams
 import pyodbc
 import json
@@ -16,9 +21,48 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-origins = [
-    getenv("ORIGIN"),
-]
+# origins = [
+#     getenv("ORIGIN"),
+# ]
+
+
+# Obtener el dominio del frontend desde las variables de entorno
+frontend_domain = getenv("FRONTEND_DOMAIN")
+
+
+# Definir una función para validar si el origen es permitido
+def is_valid_origin(origin: str):
+    return origin.startswith(frontend_domain)
+
+
+# Configurar CORS
+origins = [frontend_domain]  # Inicializar con el dominio base
+allow_all_origins = (
+    getenv("ALLOW_ALL_ORIGINS", "false").lower() == "true"
+)  # Nueva variable para permitir todos los origenes
+
+if allow_all_origins:
+    origins = ["*"]
+else:
+    # Si el dominio es localhost y estamos en desarrollo, permitir cualquier puerto en localhost
+    if frontend_domain == "http://localhost":
+        origins = [
+            "http://localhost:8000",  # Puerto por defecto de Quasar
+            "http://localhost:8080",  # Otro puerto comun de Quasar
+            "http://localhost:9006",  # Agrega otros puertos comunes que uses
+        ]
+
+        # Funcion para determinar si estamos en desarrollo
+        def is_development():
+            return getenv("ENVIRONMENT", "production") == "development"
+
+        # Agrega cualquier origen que comience con localhost si estamos en desarrollo
+        if is_development():
+            origins.append("http://localhost")  # Agrega el dominio base
+    else:
+        origins = [frontend_domain]  # Solo permitir el dominio base en producción
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -40,7 +84,6 @@ def convert_custom_types(obj):
     raise TypeError(f"Tipo no serializable {type(obj)}")
 
 
-
 @app.get("/", tags=["Root"])
 async def hello():
     return "Hello, fastapi"
@@ -54,10 +97,17 @@ async def hello():
 )
 async def conectar_parametros(params: ConexionParams):
     print(f"params: {params}")
+    print
     try:
         # Conecta a la base de datos con los parametros dinamicos
         # conn = pyodbc.connect(url_siscont)
-        conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
+        conn = get_db_connection(
+            params.host,
+            params.password,
+            params.database,
+            getenv("SQL_PORT"),
+            getenv("SQL_USER"),
+        )
         print("conn: ", conn)
         if not conn:
             raise HTTPException(
@@ -99,7 +149,13 @@ async def conectar_parametros(params: ConexionParams):
 )
 async def get_tables(params: ConexionParams):
     """Retornando lista de los nombres de las tablas y el total de tablas"""
-    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
+    conn = get_db_connection(
+        params.host,
+        params.password,
+        params.database,
+        getenv("SQL_PORT"),
+        getenv("SQL_USER"),
+    )
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 
@@ -135,7 +191,13 @@ async def get_tables(params: ConexionParams):
 )
 async def get_table_structure(table_name: str, params: ConexionParams):
     # conn = get_db_connection()
-    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
+    conn = get_db_connection(
+        params.host,
+        params.password,
+        params.database,
+        getenv("SQL_PORT"),
+        getenv("SQL_USER"),
+    )
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 
@@ -180,7 +242,13 @@ async def get_table_structure(table_name: str, params: ConexionParams):
 )
 async def get_table_data(table_name: str, params: ConexionParams):
     # conn = get_db_connection()
-    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
+    conn = get_db_connection(
+        params.host,
+        params.password,
+        params.database,
+        getenv("SQL_PORT"),
+        getenv("SQL_USER"),
+    )
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 
@@ -237,11 +305,17 @@ async def get_table_data(table_name: str, params: ConexionParams):
     "/tables-relation",
     tags=["Database"],
     summary="Muestra las relaciones entre las tablas de la BD",
-    response_model=list[dict]
+    response_model=list[dict],
 )
 async def get_tables_relations(params: ConexionParams):
     # Obteniendo conexion con la base de datos
-    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
+    conn = get_db_connection(
+        params.host,
+        params.password,
+        params.database,
+        getenv("SQL_PORT"),
+        getenv("SQL_USER"),
+    )
 
     if conn:
         # obteniendo las relaciones
@@ -249,20 +323,26 @@ async def get_tables_relations(params: ConexionParams):
         return relaciones  # devolviend la lista de diccionarios
     else:
         return [{"error": "No se pudo establecer conexion"}]
-    
+
 
 # Endpoint que obtiene la relacion de la tabla especificada
 @app.post(
     "/table-relation-tables/{tabla_name}",
     tags=["Database"],
     summary="Muestra las relaciones de una tabla específica",
-    response_model=list[dict]
+    response_model=list[dict],
 )
 async def get_table_relation(table_name: str, params: ConexionParams):
     # Obtiene la conexión a la base de datos
     print(f"params: {params}")
     print(f"host: {params.host}")
-    conn = get_db_connection(params.host, params.password, params.database, getenv("SQL_PORT"), getenv("SQL_USER"))
+    conn = get_db_connection(
+        params.host,
+        params.password,
+        params.database,
+        getenv("SQL_PORT"),
+        getenv("SQL_USER"),
+    )
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
     cursor = get_db_cursor(conn)
@@ -271,9 +351,8 @@ async def get_table_relation(table_name: str, params: ConexionParams):
         raise HTTPException(
             status_code=500, detail="No se pudo crear el cursor de conexion a la bd"
         )
-    
+
     # Obtiene las relaciones
     relaciones = table_relations(conn, table_name)
     print(f"Relaciones de la tabla: {table_name}")
     return relaciones
-    

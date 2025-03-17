@@ -3,10 +3,12 @@ from dotenv import load_dotenv
 import pyodbc
 import pandas as pd
 
+load_dotenv()
+
+
 # Funcion que prepara la cadena conexion con la BD
-def get_db_connection(host: str, password: str, database: str, port:str, user: str):
+def get_db_connection(host: str, password: str, database: str, port: str, user: str):
     """Establece la conexion y retorna la conexion a la BD SQL Server"""
-    load_dotenv(".env")
 
     SQL_USER = getenv("SQL_USER")
     SQL_PORT = getenv("SQL_PORT")
@@ -15,10 +17,12 @@ def get_db_connection(host: str, password: str, database: str, port:str, user: s
     # SQL_DATABASE = getenv("SQL_DATABASE")
 
     # print(f"HOST: {SQL_HOST}")
-    print(f"HOST: {host}, PASS: {password}, DATABASE: {database}")
+    print(
+        f"HOST: {host}, PASS: {password}, DATABASE: {database}, USER: {SQL_USER}, PORT: {SQL_PORT}"
+    )
 
     # asegurando que todas las variables de entorno estan definidas y no vacias
-    if not all([host, database, password, SQL_USER, SQL_PORT ]):
+    if not all([host, database, password, SQL_USER, SQL_PORT]):
         raise ValueError("Faltan variables de entorno por definir")
 
     # Preparando la cadena de conexion
@@ -43,6 +47,7 @@ def get_db_connection(host: str, password: str, database: str, port:str, user: s
         print(sqlstate)
         return None
 
+
 # Funcion para la conexion
 def get_db_cursor(conn):
     """Retorna un cursor para ejecutar consultas con la conexion dada"""
@@ -50,7 +55,7 @@ def get_db_cursor(conn):
         return conn.cursor()
     else:
         return None
-    
+
 
 # Funcion para obtener todas las tablas y sus relaciones
 def tables_relations(conn):
@@ -66,10 +71,11 @@ def tables_relations(conn):
         INNER JOIN 
             sys.foreign_key_columns fc ON f.object_id = fc.constraint_object_id
     """
-    
-    df = pd.read_sql_query(query,conn)
-    relaciones = df.to_dict(orient='records')
+
+    df = pd.read_sql_query(query, conn)
+    relaciones = df.to_dict(orient="records")
     return relaciones
+
 
 # Funcion que obtiene las tablas que se relacionan con la tabla especificada
 def table_relations(conn, table_name):
@@ -89,7 +95,7 @@ def table_relations(conn, table_name):
         OR 
             OBJECT_NAME(f.referenced_object_id) = '{table_name}'
     """
-    
+
     df = pd.read_sql_query(query, conn)
-    relaciones = df.to_dict(orient='records')
+    relaciones = df.to_dict(orient="records")
     return relaciones
