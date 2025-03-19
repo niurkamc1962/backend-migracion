@@ -49,6 +49,7 @@ else:
         origins = [
             "http://localhost:8000",  # Puerto por defecto de Quasar
             "http://localhost:8080",  # Otro puerto comun de Quasar
+            "http://localhost:9000",  # Agrega otros puertos comunes que uses
             "http://localhost:9006",  # Agrega otros puertos comunes que uses
         ]
 
