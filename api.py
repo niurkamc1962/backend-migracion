@@ -5,8 +5,8 @@ from os import getenv, path, makedirs
 from db.database import (
     get_db_connection,
     get_db_cursor,
-    table_relations,
-    tables_relations,
+    relacion_tabla,
+    relaciones_todas_tablas,
 )
 from db.models import ConexionParams
 import pyodbc
@@ -243,6 +243,7 @@ async def get_table_structure(table_name: str, params: ConexionParams):
 )
 async def get_table_data(table_name: str, params: ConexionParams):
     # conn = get_db_connection()
+
     conn = get_db_connection(
         params.host,
         params.password,
@@ -301,14 +302,52 @@ async def get_table_data(table_name: str, params: ConexionParams):
         conn.close()
 
 
+# Endpoint que obtiene la relacion de la tabla especificada
+@app.post(
+    "/table-relation/{table_name}",
+    tags=["Database"],
+    summary="Muestra las relaciones de una tabla específica",
+    response_model=list[dict],
+)
+async def get_table_relation(table_name: str, params: ConexionParams):
+    # Obtiene la conexión a la base de datos
+    print("******ENTRE EN get_table_relation ******")
+    print(f"Tabla name: {table_name}")
+    print(f"Params(body): {params}")
+    print(f"Puerto: {getenv('SQL_PORT')}")
+    print(f"usuario: {getenv('SQL_USER')}")
+
+    conn = get_db_connection(
+        params.host,
+        params.password,
+        params.database,
+        getenv("SQL_PORT"),
+        getenv("SQL_USER"),
+    )
+
+    if not conn:
+        raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
+    cursor = get_db_cursor(conn)
+    if not cursor:
+        conn.close()
+        raise HTTPException(
+            status_code=500, detail="No se pudo crear el cursor de conexion a la bd"
+        )
+
+    # Obtiene las relaciones
+    relaciones = relacion_tabla(conn, table_name)
+    print(f"Relaciones de la tabla: {table_name}")
+    return relaciones
+
+
 # Endpoint que obtiene las relaciones entre las tablas de una Base de datos
 @app.post(
-    "/tables-relation",
+    "/all-relation",
     tags=["Database"],
     summary="Muestra las relaciones entre las tablas de la BD",
     response_model=list[dict],
 )
-async def get_tables_relations(params: ConexionParams):
+async def get_all_relation(params: ConexionParams):
     # Obteniendo conexion con la base de datos
     conn = get_db_connection(
         params.host,
@@ -320,40 +359,7 @@ async def get_tables_relations(params: ConexionParams):
 
     if conn:
         # obteniendo las relaciones
-        relaciones = tables_relations(conn)
+        relaciones = relaciones_todas_tablas(conn)
         return relaciones  # devolviend la lista de diccionarios
     else:
         return [{"error": "No se pudo establecer conexion"}]
-
-
-# Endpoint que obtiene la relacion de la tabla especificada
-@app.post(
-    "/table-relation-tables/{tabla_name}",
-    tags=["Database"],
-    summary="Muestra las relaciones de una tabla específica",
-    response_model=list[dict],
-)
-async def get_table_relation(table_name: str, params: ConexionParams):
-    # Obtiene la conexión a la base de datos
-    print(f"params: {params}")
-    print(f"host: {params.host}")
-    conn = get_db_connection(
-        params.host,
-        params.password,
-        params.database,
-        getenv("SQL_PORT"),
-        getenv("SQL_USER"),
-    )
-    if not conn:
-        raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
-    cursor = get_db_cursor(conn)
-    if not cursor:
-        conn.close()
-        raise HTTPException(
-            status_code=500, detail="No se pudo crear el cursor de conexion a la bd"
-        )
-
-    # Obtiene las relaciones
-    relaciones = table_relations(conn, table_name)
-    print(f"Relaciones de la tabla: {table_name}")
-    return relaciones

@@ -58,7 +58,7 @@ def get_db_cursor(conn):
 
 
 # Funcion para obtener todas las tablas y sus relaciones
-def tables_relations(conn):
+def relaciones_todas_tablas(conn):
     """Ejecuta la consulta para obtener las relaciones entre tablas"""
     query = """
         SELECT 
@@ -78,7 +78,7 @@ def tables_relations(conn):
 
 
 # Funcion que obtiene las tablas que se relacionan con la tabla especificada
-def table_relations(conn, table_name):
+def relacion_tabla(conn, table_name):
     print(f"conn desde obtener relaciones: {conn}")
     query = f"""
         SELECT 
