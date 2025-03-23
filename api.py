@@ -11,19 +11,12 @@ from db.database import (
 from db.models import ConexionParams, Payload
 import pyodbc
 import json
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from pydantic import BaseModel
 
 
-# from db.models import ConexionParams
-# from dotenv import load_dotenv
-
 app = FastAPI()
-
-# origins = [
-#     getenv("ORIGIN"),
-# ]
 
 
 # Obtener el dominio del frontend desde las variables de entorno
@@ -73,16 +66,16 @@ app.add_middleware(
 )
 
 
-# Funcion para convertir objetos Decimal a str para no perder los decimales,
-# las fechas a formato ISO porque los JSON no serializan campos decimal ni datetime
-def convert_custom_types(obj):
-    if isinstance(obj, Decimal):
-        return float(obj)  # convierte decimal a flotante
-    elif isinstance(obj, datetime):
-        return obj.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )  # convertir datetime a string en formato ISO 8601
-    raise TypeError(f"Tipo no serializable {type(obj)}")
+# Serializa valores no serializables a tipos compatibles con JSON."""
+def serialize_value(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    elif isinstance(value, Decimal):
+        return float(value)
+    elif isinstance(value, bytes):
+        return value.decode("utf-8")
+    else:
+        return str(value)
 
 
 # Función para verificar si un valor es serializable
@@ -276,16 +269,10 @@ async def get_table_data(table_name: str, payload: Payload):
         if not path.exists(output_folder):
             makedirs(output_folder)
 
-        # Consulta para obtener los datos de la tabla
-        # query = f"SELECT * FROM {table_name}"
-
-        # Filtrar los campos obligatorios y construir la consulta SQL
-        selected_fields = [field.nombre_campo for field in fields if field.obligatorio]
-        if not selected_fields:
-            raise HTTPException(
-                status_code=400, detail="No se proporcionaron campos obligatorios"
-            )
-
+        # Filtrar los campos y construir la consulta SQL
+        selected_fields = [
+            field.nombre_campo for field in fields
+        ]  # Seleccionar todos los campos
         query_fields = ", ".join(selected_fields)
         query = f"SELECT {query_fields} FROM {table_name}"
         print(f"query: {query}")
@@ -294,33 +281,37 @@ async def get_table_data(table_name: str, payload: Payload):
         rows = cursor.fetchall()
 
         # Obteniendo los nombres de las columnas
-        # columns = [column[0] for column in cursor.description]
-        columns = selected_fields
+        columns = [column[0] for column in cursor.description]
 
         # Convirtiendo los datos a formato JSON
         table_data = []
         for row in rows:
-            row_data = dict(zip(columns, row))
-            # table_data.append(row_data)
-            serializable_row_data = {
-                key: value for key, value in row_data.items() if is_serializable(value)
-            }
-            table_data.append(serializable_row_data)
+            row_data = {}
+            for i, field_name in enumerate(columns):
+                value = row[i]
+                if not is_serializable(
+                    value
+                ):  # Verificar el valor, no el nombre del campo
+                    value = serialize_value(value)  # Serializar si es necesario
+                row_data[field_name] = value
+            table_data.append(row_data)
 
         file_path = path.join(output_folder, f"{table_name}.json")
 
         # Guardar los datos en un archivo JSON
-        with open(file_path, "w") as json_file:
+        with open(file_path, "w", encoding="utf-8") as json_file:
             json.dump(
                 {"table_name": table_name, "data": table_data},
                 json_file,
                 indent=4,
-                default=convert_custom_types,
+                default=serialize_value,
+                ensure_ascii=False,
             )
+
         # Retornando la tabla en formato JSON
         return {"table_name": table_name, "data": table_data}
     except Exception as e:
-        raise HTTPException(code=500, detail=f"Error al procesar la tabla: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al procesar la tabla: {e}")
 
     finally:
         cursor.close()
