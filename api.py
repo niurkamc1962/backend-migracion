@@ -8,7 +8,7 @@ from db.database import (
     relacion_tabla,
     relaciones_todas_tablas,
 )
-from db.models import ConexionParams
+from db.models import ConexionParams, Payload
 import pyodbc
 import json
 from datetime import datetime
@@ -85,6 +85,15 @@ def convert_custom_types(obj):
     raise TypeError(f"Tipo no serializable {type(obj)}")
 
 
+# Función para verificar si un valor es serializable
+def is_serializable(value):
+    try:
+        json.dumps(value)
+        return True
+    except (TypeError, OverflowError):
+        return False
+
+
 @app.get("/", tags=["Root"])
 async def hello():
     return "Hello, fastapi"
@@ -97,8 +106,6 @@ async def hello():
     summary="Obtiene la ip del servidor de la BD desde el frontend para conectar",
 )
 async def conectar_parametros(params: ConexionParams):
-    print(f"params: {params}")
-    print
     try:
         # Conecta a la base de datos con los parametros dinamicos
         # conn = pyodbc.connect(url_siscont)
@@ -241,8 +248,9 @@ async def get_table_structure(table_name: str, params: ConexionParams):
     tags=["Database"],
     summary="Convierte la informacion de la tabla especificada a un archivo JSON",
 )
-async def get_table_data(table_name: str, params: ConexionParams):
-    # conn = get_db_connection()
+async def get_table_data(table_name: str, payload: Payload):
+    params = payload.params
+    fields = payload.fields
 
     conn = get_db_connection(
         params.host,
@@ -269,18 +277,35 @@ async def get_table_data(table_name: str, params: ConexionParams):
             makedirs(output_folder)
 
         # Consulta para obtener los datos de la tabla
-        query = f"SELECT * FROM {table_name}"
+        # query = f"SELECT * FROM {table_name}"
+
+        # Filtrar los campos obligatorios y construir la consulta SQL
+        selected_fields = [field.nombre_campo for field in fields if field.obligatorio]
+        if not selected_fields:
+            raise HTTPException(
+                status_code=400, detail="No se proporcionaron campos obligatorios"
+            )
+
+        query_fields = ", ".join(selected_fields)
+        query = f"SELECT {query_fields} FROM {table_name}"
+        print(f"query: {query}")
+
         cursor.execute(query)
         rows = cursor.fetchall()
 
         # Obteniendo los nombres de las columnas
-        columns = [column[0] for column in cursor.description]
+        # columns = [column[0] for column in cursor.description]
+        columns = selected_fields
 
         # Convirtiendo los datos a formato JSON
         table_data = []
         for row in rows:
             row_data = dict(zip(columns, row))
-            table_data.append(row_data)
+            # table_data.append(row_data)
+            serializable_row_data = {
+                key: value for key, value in row_data.items() if is_serializable(value)
+            }
+            table_data.append(serializable_row_data)
 
         file_path = path.join(output_folder, f"{table_name}.json")
 
