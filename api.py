@@ -191,7 +191,6 @@ async def get_tables(params: ConexionParams):
     summary="Muestra la estructura de la tabla especificada",
 )
 async def get_table_structure(table_name: str, params: ConexionParams):
-    # conn = get_db_connection()
     conn = get_db_connection(
         params.host,
         params.password,
@@ -264,7 +263,7 @@ async def get_table_data(table_name: str, payload: Payload):
 
     try:
         # definiendo la carpeta donde se guardaran los archivos json
-        output_folder = "archivos_json"
+        output_folder = "formatos_json"
         # creando la carpeta si no existe
         if not path.exists(output_folder):
             makedirs(output_folder)
@@ -379,3 +378,37 @@ async def get_all_relation(params: ConexionParams):
         return relaciones  # devolviend la lista de diccionarios
     else:
         return [{"error": "No se pudo establecer conexion"}]
+
+
+# Funcion para la relacion entre los campos sql-server a doctype
+def mapear_tipos(campo_sql):
+    mapeo = {
+        "int": {"fieldtype": "Int", "options": None},
+        "smallint": {"fieldtype": "Int", "options": None},
+        "varchar": {"fieldtype": "Data", "options": None},
+        "char": {"fieldtype": "Data", "options": None},
+        "datetime": {"fieldtype": "Date", "options": None},
+        "datetime2": {"fieldtype": "DateTime", "options": None},
+        "bit": {"fieldtype": "Check", "options": None},
+        "decimal": {"fieldtype": "Currency", "options": None},
+        "money": {"fieldtype": "Currency", "options": None},
+        "text": {"fieldtype": "Text", "options": None},
+        "ntext": {"fieldtype": "Text", "options": None},
+    }
+    return mapeo.get(campo_sql["tipo_campo"], {"fieldtype": "Data", "options": None})
+
+
+# Funcion para el caso de las llaves foraneas y el tipo link de Frappe
+def detectar_relaciones(conn, tabla_sql, campo):
+    cursor = get_db_cursor(conn)
+    query = f"""
+        SELECT referenced_object_id 
+        FROM sys.foreign_keys 
+        INNER JOIN sys.foreign_key_columns 
+            ON sys.foreign_keys.object_id = sys.foreign_key_columns.constraint_object_id
+        WHERE parent_object_id = OBJECT_ID('{tabla_sql}')
+          AND parent_column_id = COL_NAME(OBJECT_ID('{tabla_sql}'), {campo.nombre_campo})
+    """
+    cursor.execute(query)
+    resultado = cursor.fetchone()
+    return "Link" if resultado else None

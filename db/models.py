@@ -15,12 +15,21 @@ class Relacion(BaseModel):
     columna_hija: str
 
 
-class Field(BaseModel):
+class Campo(BaseModel):
     nombre_campo: str
     tipo_campo: str
     obligatorio: bool
+    nombre_campo_erp: str  # nombre del campo en el doctype
+    tipo_campo_erp: str  # tipo de campo en el doctype
+
+
+class TablaSQL(BaseModel):
+    nombre_tabla: str  # nombre descriptivo de la tabla SQL
+    nombre_tabla_sql: str  # Nombre real en la tabla SQL
+    campos: List[Campo]
+    nombre_doctype: str  # nombre del Doctype
 
 
 class Payload(BaseModel):
     params: ConexionParams
-    fields: List[Field]
+    fields: List[Campo]

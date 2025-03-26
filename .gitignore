@@ -32,4 +32,4 @@ __pycache__/
 **/*.pyd
 
 # no subir los archivos JSON creados de las tablas de siscont
-archivos_json/
+formatos_json/
