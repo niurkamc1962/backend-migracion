@@ -7,6 +7,9 @@ from db.database import (
     get_db_cursor,
     relacion_tabla,
     relaciones_todas_tablas,
+    map_sql_type_to_frappe,
+    detectar_relaciones,
+    get_table_structure,
 )
 from db.models import ConexionParams, Payload
 import pyodbc
@@ -190,7 +193,7 @@ async def get_tables(params: ConexionParams):
     tags=["Database"],
     summary="Muestra la estructura de la tabla especificada",
 )
-async def get_table_structure(table_name: str, params: ConexionParams):
+async def get_table_structure_endpoint(table_name: str, params: ConexionParams):
     conn = get_db_connection(
         params.host,
         params.password,
@@ -201,37 +204,13 @@ async def get_table_structure(table_name: str, params: ConexionParams):
     if not conn:
         raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 
-    cursor = get_db_cursor(conn)
-    if not cursor:
+    try:
+        table_structure = get_table_structure(conn, table_name)
+        if not table_structure:
+            raise HTTPException(status_code=404, detail="No existe la tabla")
+        return {"table_name": table_name, "columns": table_structure}
+    finally:
         conn.close()
-        raise HTTPException(
-            status_code=500, detail="No se pudo crear el cursor de conexion a la bd"
-        )
-
-    query = """
-    SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = ? """
-
-    cursor.execute(query, table_name)
-    columns = cursor.fetchall()
-
-    if not columns:
-        raise HTTPException(status_code=404, detail="No existe la tabla")
-
-    # Formateando la respuesta
-    table_structure = []
-    for column in columns:
-        column_info = {
-            "column_name": column.COLUMN_NAME,
-            "data_type": column.DATA_TYPE,
-            "max_length": column.CHARACTER_MAXIMUM_LENGTH,
-            "is_nullable": column.IS_NULLABLE,
-        }
-        table_structure.append(column_info)
-
-    conn.close()
-    return {"table_name": table_name, "columns": table_structure}
 
 
 # Endpoint que convierte la tabla seleccionada a fichero JSON
@@ -378,37 +357,3 @@ async def get_all_relation(params: ConexionParams):
         return relaciones  # devolviend la lista de diccionarios
     else:
         return [{"error": "No se pudo establecer conexion"}]
-
-
-# Funcion para la relacion entre los campos sql-server a doctype
-def mapear_tipos(campo_sql):
-    mapeo = {
-        "int": {"fieldtype": "Int", "options": None},
-        "smallint": {"fieldtype": "Int", "options": None},
-        "varchar": {"fieldtype": "Data", "options": None},
-        "char": {"fieldtype": "Data", "options": None},
-        "datetime": {"fieldtype": "Date", "options": None},
-        "datetime2": {"fieldtype": "DateTime", "options": None},
-        "bit": {"fieldtype": "Check", "options": None},
-        "decimal": {"fieldtype": "Currency", "options": None},
-        "money": {"fieldtype": "Currency", "options": None},
-        "text": {"fieldtype": "Text", "options": None},
-        "ntext": {"fieldtype": "Text", "options": None},
-    }
-    return mapeo.get(campo_sql["tipo_campo"], {"fieldtype": "Data", "options": None})
-
-
-# Funcion para el caso de las llaves foraneas y el tipo link de Frappe
-def detectar_relaciones(conn, tabla_sql, campo):
-    cursor = get_db_cursor(conn)
-    query = f"""
-        SELECT referenced_object_id 
-        FROM sys.foreign_keys 
-        INNER JOIN sys.foreign_key_columns 
-            ON sys.foreign_keys.object_id = sys.foreign_key_columns.constraint_object_id
-        WHERE parent_object_id = OBJECT_ID('{tabla_sql}')
-          AND parent_column_id = COL_NAME(OBJECT_ID('{tabla_sql}'), {campo.nombre_campo})
-    """
-    cursor.execute(query)
-    resultado = cursor.fetchone()
-    return "Link" if resultado else None

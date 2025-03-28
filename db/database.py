@@ -2,6 +2,7 @@ from os import getenv
 from dotenv import load_dotenv
 import pyodbc
 import pandas as pd
+from typing import Optional, Dict, List
 
 load_dotenv()
 
@@ -99,3 +100,106 @@ def relacion_tabla(conn, table_name):
     df = pd.read_sql_query(query, conn)
     relaciones = df.to_dict(orient="records")
     return relaciones
+
+
+# Funcion para la relacion entre los campos sql-server a doctype
+def map_sql_type_to_frappe(data_type: str) -> str:
+    """Mapea tipos de datos SQL a tipos de campo de Frappe"""
+    data_type = data_type.lower().strip()
+
+    type_mapping = {
+        # Texto
+        "varchar": "Data",
+        "nvarchar": "Data",
+        "char": "Data",
+        "nchar": "Data",
+        "text": "Text",
+        "ntext": "Text",
+        "longtext": "Text",
+        "mediumtext": "Text",
+        "tinytext": "Text",
+        # Números enteros
+        "int": "Int",
+        "integer": "Int",
+        "bigint": "Int",
+        "smallint": "Int",
+        "tinyint": "Int",
+        # Números decimales
+        "decimal": "Float",
+        "numeric": "Float",
+        "float": "Float",
+        "double": "Float",
+        "real": "Float",
+        # Fechas y tiempos
+        "date": "Date",
+        "datetime": "Datetime",
+        "datetime2": "Datetime",
+        "smalldatetime": "Datetime",
+        "timestamp": "Datetime",
+        "time": "Time",
+        # Binarios
+        "binary": "Data",
+        "varbinary": "Data",
+        "image": "Attach",
+        # Booleanos
+        "bit": "Check",
+        "boolean": "Check",
+        # JSON
+        "json": "JSON",
+        # Especiales
+        "uniqueidentifier": "Data",  # UUID
+    }
+
+    # Buscar coincidencia exacta primero
+    if data_type in type_mapping:
+        return type_mapping[data_type]
+
+    # Manejar tipos con parámetros como varchar(255), decimal(10,2), etc.
+    base_type = data_type.split("(")[0]
+    if base_type in type_mapping:
+        return type_mapping[base_type]
+
+    # Para tipos desconocidos, usar Data como predeterminado
+    return "Data"
+
+
+# Funcion para el caso de las llaves foraneas y el tipo link de Frappe
+def detectar_relaciones(conn, tabla_sql, campo):
+    cursor = get_db_cursor(conn)
+    query = f"""
+        SELECT referenced_object_id 
+        FROM sys.foreign_keys 
+        INNER JOIN sys.foreign_key_columns 
+            ON sys.foreign_keys.object_id = sys.foreign_key_columns.constraint_object_id
+        WHERE parent_object_id = OBJECT_ID('{tabla_sql}')
+          AND parent_column_id = COL_NAME(OBJECT_ID('{tabla_sql}'), {campo.nombre_campo})
+    """
+    cursor.execute(query)
+    resultado = cursor.fetchone()
+    return "Link" if resultado else None
+
+
+# Funcio para obtener la estructura de la tabla
+def get_table_structure(conn, table_name: str) -> List[Dict]:
+    """Obtiene la estructura de una tabla específica"""
+    cursor = conn.cursor()
+    try:
+        query = """
+        SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = ?
+        """
+        cursor.execute(query, table_name)
+        columns = cursor.fetchall()
+
+        return [
+            {
+                "column_name": column.COLUMN_NAME,
+                "data_type": column.DATA_TYPE,
+                "max_length": column.CHARACTER_MAXIMUM_LENGTH,
+                "is_nullable": column.IS_NULLABLE,
+            }
+            for column in columns
+        ]
+    finally:
+        cursor.close()
