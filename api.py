@@ -1,64 +1,42 @@
-from typing import List, Dict
+from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from os import getenv, path, makedirs
-from db.database import (
-    get_db_connection,
-    get_db_cursor,
-    relacion_tabla,
-    relaciones_todas_tablas,
-    map_sql_type_to_frappe,
-    detectar_relaciones,
-    get_table_structure,
-)
+from os import getenv
+from db.database import DatabaseManager, create_db_manager
 from db.models import ConexionParams, Payload
 import pyodbc
 import json
+
 from datetime import datetime, date
 from decimal import Decimal
 from pydantic import BaseModel
 
-
 app = FastAPI()
 
-
-# Obtener el dominio del frontend desde las variables de entorno
+# Configuración CORS (se mantiene igual)
 frontend_domain = getenv("FRONTEND_DOMAIN")
 
 
-# Definir una función para validar si el origen es permitido
 def is_valid_origin(origin: str):
     return origin.startswith(frontend_domain)
 
 
-# Configurar CORS
-origins = [frontend_domain]  # Inicializar con el dominio base
-allow_all_origins = (
-    getenv("ALLOW_ALL_ORIGINS", "false").lower() == "true"
-)  # Nueva variable para permitir todos los origenes
+origins = [frontend_domain]
+allow_all_origins = getenv("ALLOW_ALL_ORIGINS", "false").lower() == "true"
 
 if allow_all_origins:
     origins = ["*"]
-else:
-    # Si el dominio es localhost y estamos en desarrollo, permitir cualquier puerto en localhost
-    if frontend_domain == "http://localhost":
-        origins = [
-            "http://localhost:8000",  # Puerto por defecto de Quasar
-            "http://localhost:8080",  # Otro puerto comun de Quasar
-            "http://localhost:9000",  # Agrega otros puertos comunes que uses
-            "http://localhost:9006",  # Agrega otros puertos comunes que uses
+elif frontend_domain == "http://localhost":
+    origins.extend(
+        [
+            "http://localhost:8000",
+            "http://localhost:8080",
+            "http://localhost:9000",
+            "http://localhost:9006",
         ]
-
-        # Funcion para determinar si estamos en desarrollo
-        def is_development():
-            return getenv("ENVIRONMENT", "production") == "development"
-
-        # Agrega cualquier origen que comience con localhost si estamos en desarrollo
-        if is_development():
-            origins.append("http://localhost")  # Agrega el dominio base
-    else:
-        origins = [frontend_domain]  # Solo permitir el dominio base en producción
-
+    )
+    if getenv("ENVIRONMENT", "production") == "development":
+        origins.append("http://localhost")
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,291 +47,81 @@ app.add_middleware(
 )
 
 
-# Serializa valores no serializables a tipos compatibles con JSON."""
-def serialize_value(value):
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    elif isinstance(value, Decimal):
-        return float(value)
-    elif isinstance(value, bytes):
-        return value.decode("utf-8")
-    else:
-        return str(value)
-
-
-# Función para verificar si un valor es serializable
-def is_serializable(value):
-    try:
-        json.dumps(value)
-        return True
-    except (TypeError, OverflowError):
-        return False
-
-
+# Endpoints refactorizados
 @app.get("/", tags=["Root"])
 async def hello():
-    return "Hello, fastapi"
+    return {"message": "Hello, FastAPI"}
 
 
-# Endpoint para recibir los parametros del frontend quasar
-@app.post(
-    "/conectar-params",
-    tags=["Database"],
-    summary="Obtiene la ip del servidor de la BD desde el frontend para conectar",
-)
+@app.post("/conectar-params", tags=["Database"])
 async def conectar_parametros(params: ConexionParams):
     try:
-        # Conecta a la base de datos con los parametros dinamicos
-        # conn = pyodbc.connect(url_siscont)
-        conn = get_db_connection(
-            params.host,
-            params.password,
-            params.database,
-            getenv("SQL_PORT"),
-            getenv("SQL_USER"),
-        )
-        print("conn: ", conn)
-        if not conn:
-            raise HTTPException(
-                status_code=500, detail="No se pudo establecer la conexión."
-            )
-            # Crea un cursor
-        cursor = conn.cursor()
-
-        # Ejemplo: Obtiene las tablas
-        cursor.execute(
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
-        )
-        tables = [row.TABLE_NAME for row in cursor.fetchall()]
-
-        # Cierra la conexión
-        conn.close()
-
-        # Retorna la respuesta
-        return {
-            "status": "success",
-            "message": "Conexión exitosa y tablas obtenidas.",
-            "tables": tables,
-            "parameters": params,  # devuelve los parametros que se usaron
-        }
-    except pyodbc.Error as ex:
-        sqlstate = ex.args[0]
-        error_message = f"Error de conexión: {ex}. SQL State: {sqlstate}"
-        raise HTTPException(status_code=500, detail=error_message)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
-
-
-# Endpoint que muestra todas las tablas de la BD Siscont
-@app.post(
-    "/tables",
-    tags=["Database"],
-    response_model=Dict[str, List[str] | int],
-    summary="Retorna todas las tablas de la base de datos de Siscont",
-)
-async def get_tables(params: ConexionParams):
-    """Retornando lista de los nombres de las tablas y el total de tablas"""
-    conn = get_db_connection(
-        params.host,
-        params.password,
-        params.database,
-        getenv("SQL_PORT"),
-        getenv("SQL_USER"),
-    )
-    if not conn:
-        raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
-
-    cursor = get_db_cursor(conn)
-    if not cursor:
-        conn.close()
-        raise HTTPException(
-            status_code=500, detail="No se pudo crear el cursor de conexion a la bd"
-        )
-
-    try:
-        cursor.execute(
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
-        )
-        tables = [row.TABLE_NAME for row in cursor.fetchall()]
-
-        # obteniendo el total de tablas
-        total_tables = len(tables)
-
-        return {"tables": tables, "total_tables": total_tables}
+        with create_db_manager(params) as db:
+            tables = db.get_all_tables()
+            table_count = len(tables)
+            return {"tables": tables, "table_count": table_count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
 
 
-# Endpoint que muestra la estructura de la tabla seleccionada
-@app.post(
-    "/table-structure/{table_name}",
-    tags=["Database"],
-    summary="Muestra la estructura de la tabla especificada",
-)
-async def get_table_structure_endpoint(table_name: str, params: ConexionParams):
-    conn = get_db_connection(
-        params.host,
-        params.password,
-        params.database,
-        getenv("SQL_PORT"),
-        getenv("SQL_USER"),
-    )
-    if not conn:
-        raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
-
+@app.post("/tables", tags=["Database"], response_model=Dict[str, Any])
+async def get_tables_endpoint(params: ConexionParams):
     try:
-        table_structure = get_table_structure(conn, table_name)
-        if not table_structure:
-            raise HTTPException(status_code=404, detail="No existe la tabla")
-        return {"table_name": table_name, "columns": table_structure}
-    finally:
-        conn.close()
+        with create_db_manager(params) as db:
+            return db.get_all_tables()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# Endpoint que convierte la tabla seleccionada a fichero JSON
-@app.post(
-    "/table-data/{table_name}",
-    tags=["Database"],
-    summary="Convierte la informacion de la tabla especificada a un archivo JSON",
-)
-async def get_table_data(table_name: str, payload: Payload):
-    params = payload.params
-    fields = payload.fields
+@app.post("/table-structure/{table_name}", tags=["Database"])
+async def get_table_structure_endpoint(table_name: str, params: ConexionParams):
+    try:
+        with create_db_manager(params) as db:
+            structure = db.get_table_structure(table_name)
+            if not structure:
+                raise HTTPException(status_code=404, detail="Tabla no encontrada")
+            return {"table_name": table_name, "columns": structure}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    conn = get_db_connection(
-        params.host,
-        params.password,
-        params.database,
-        getenv("SQL_PORT"),
-        getenv("SQL_USER"),
-    )
-    if not conn:
-        raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
 
-    cursor = get_db_cursor(conn)
-    if not cursor:
-        conn.close()
+@app.post("/table-data/{table_name}", tags=["Database"])
+async def get_table_data_endpoint(table_name: str, payload: Payload):
+    try:
+        with create_db_manager(payload.params) as db:
+            fields = [field.nombre_campo for field in payload.fields]
+            return db.export_table_to_json(table_name=table_name, fields=fields)
+    except Exception as e:
         raise HTTPException(
-            status_code=500, detail="No se pudo crear el cursor de conexion a la bd"
+            status_code=500, detail=f"Error al procesar la tabla {table_name}: {str(e)}"
         )
 
-    try:
-        # definiendo la carpeta donde se guardaran los archivos json
-        output_folder = "formatos_json"
-        # creando la carpeta si no existe
-        if not path.exists(output_folder):
-            makedirs(output_folder)
 
-        # Filtrar los campos y construir la consulta SQL
-        selected_fields = [
-            field.nombre_campo for field in fields
-        ]  # Seleccionar todos los campos
-        query_fields = ", ".join(selected_fields)
-        query = f"SELECT {query_fields} FROM {table_name}"
-        print(f"query: {query}")
-
-        cursor.execute(query)
-        rows = cursor.fetchall()
-
-        # Obteniendo los nombres de las columnas
-        columns = [column[0] for column in cursor.description]
-
-        # Convirtiendo los datos a formato JSON
-        table_data = []
-        for row in rows:
-            row_data = {}
-            for i, field_name in enumerate(columns):
-                value = row[i]
-                if not is_serializable(
-                    value
-                ):  # Verificar el valor, no el nombre del campo
-                    value = serialize_value(value)  # Serializar si es necesario
-                row_data[field_name] = value
-            table_data.append(row_data)
-
-        file_path = path.join(output_folder, f"{table_name}.json")
-
-        # Guardar los datos en un archivo JSON
-        with open(file_path, "w", encoding="utf-8") as json_file:
-            json.dump(
-                {"table_name": table_name, "data": table_data},
-                json_file,
-                indent=4,
-                default=serialize_value,
-                ensure_ascii=False,
-            )
-
-        # Retornando la tabla en formato JSON
-        return {"table_name": table_name, "data": table_data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al procesar la tabla: {e}")
-
-    finally:
-        cursor.close()
-        conn.close()
-
-
-# Endpoint que obtiene la relacion de la tabla especificada
 @app.post(
     "/table-relation/{table_name}",
     tags=["Database"],
-    summary="Muestra las relaciones de una tabla específica",
-    response_model=list[dict],
+    response_model=List[Dict[str, Any]],
 )
-async def get_table_relation(table_name: str, params: ConexionParams):
-    # Obtiene la conexión a la base de datos
-    print("******ENTRE EN get_table_relation ******")
-    print(f"Tabla name: {table_name}")
-    print(f"Params(body): {params}")
-    print(f"Puerto: {getenv('SQL_PORT')}")
-    print(f"usuario: {getenv('SQL_USER')}")
-
-    conn = get_db_connection(
-        params.host,
-        params.password,
-        params.database,
-        getenv("SQL_PORT"),
-        getenv("SQL_USER"),
-    )
-
-    if not conn:
-        raise HTTPException(status_code=500, detail="No se pudo conectar con la bd")
-    cursor = get_db_cursor(conn)
-    if not cursor:
-        conn.close()
+async def get_table_relation_endpoint(table_name: str, params: ConexionParams):
+    try:
+        with create_db_manager(params) as db:
+            relations = db.get_table_relations(table_name)
+            if not relations:
+                return []
+            return relations
+    except pyodbc.Error as e:
+        raise HTTPException(status_code=400, detail=f"Error de base de datos: {str(e)}")
+    except Exception as e:
         raise HTTPException(
-            status_code=500, detail="No se pudo crear el cursor de conexion a la bd"
+            status_code=500,
+            detail=f"Error al obtener relaciones para {table_name}: {str(e)}",
         )
 
-    # Obtiene las relaciones
-    relaciones = relacion_tabla(conn, table_name)
-    print(f"Relaciones de la tabla: {table_name}")
-    return relaciones
 
-
-# Endpoint que obtiene las relaciones entre las tablas de una Base de datos
-@app.post(
-    "/all-relation",
-    tags=["Database"],
-    summary="Muestra las relaciones entre las tablas de la BD",
-    response_model=list[dict],
-)
-async def get_all_relation(params: ConexionParams):
-    # Obteniendo conexion con la base de datos
-    conn = get_db_connection(
-        params.host,
-        params.password,
-        params.database,
-        getenv("SQL_PORT"),
-        getenv("SQL_USER"),
-    )
-
-    if conn:
-        # obteniendo las relaciones
-        relaciones = relaciones_todas_tablas(conn)
-        return relaciones  # devolviend la lista de diccionarios
-    else:
-        return [{"error": "No se pudo establecer conexion"}]
+@app.post("/all-relation", tags=["Database"], response_model=List[Dict])
+async def get_all_relation_endpoint(params: ConexionParams):
+    try:
+        with create_db_manager(params) as db:
+            return db.get_all_relations()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

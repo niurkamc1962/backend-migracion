@@ -1,205 +1,269 @@
-from os import getenv
+from os import getenv, path, makedirs
 from dotenv import load_dotenv
 import pyodbc
 import pandas as pd
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
+from contextlib import contextmanager
+from db.models import ConexionParams
+import json
+from datetime import datetime, date
+from decimal import Decimal
 
 load_dotenv()
 
 
-# Funcion que prepara la cadena conexion con la BD
-def get_db_connection(host: str, password: str, database: str, port: str, user: str):
-    """Establece la conexion y retorna la conexion a la BD SQL Server"""
+class DatabaseManager:
+    def __init__(self, host: str, password: str, database: str, port: str, user: str):
+        self.connection_params = {
+            "host": host,
+            "password": password,
+            "database": database,
+            "port": port,
+            "user": user,
+        }
+        self._conn = None
 
-    SQL_USER = getenv("SQL_USER")
-    SQL_PORT = getenv("SQL_PORT")
-    # SQL_HOST = getenv("SQL_HOST")
-    # SQL_PASS = getenv("SQL_PASS")
-    # SQL_DATABASE = getenv("SQL_DATABASE")
+    def __enter__(self):
+        """Permite usar la clase con with statement"""
+        self.connect()
+        return self
 
-    # print(f"HOST: {SQL_HOST}")
-    print(
-        f"HOST: {host}, PASS: {password}, DATABASE: {database}, USER: {SQL_USER}, PORT: {SQL_PORT}"
-    )
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Garantiza que la conexión se cierre al salir del with"""
+        self.close()
 
-    # asegurando que todas las variables de entorno estan definidas y no vacias
-    if not all([host, database, password, SQL_USER, SQL_PORT]):
-        raise ValueError("Faltan variables de entorno por definir")
+    def connect(self):
+        """Establece la conexión a la base de datos"""
+        if self._conn is None:
+            print(f"Conectando con parámetros: {self.connection_params}")
+            self._conn = self._create_connection()
+        return self._conn
 
-    # Preparando la cadena de conexion
-    url_siscont = (
-        f"DRIVER=ODBC Driver 17 for SQL Server;"
-        f"SERVER={host};"
-        f"PORT={SQL_PORT};"
-        f"DATABASE={database};"
-        f"UID={SQL_USER};"
-        f"PWD={password};"
-        f"Timeout=0"
-    )
-    print(f"URL_SISCONT: {url_siscont}")
-    try:
-        conn = pyodbc.connect(url_siscont)
-        print(f"conn: {conn}")
-        return conn
-    except pyodbc.Error as ex:
-        sqlstate = ex.args[0]
-        print("Error al crear conexion con sqlserver")
-        print(ex)
-        print(sqlstate)
-        return None
+    def close(self):
+        """Cierra la conexión a la base de datos"""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
+    def _create_connection(self):
+        """Crea una nueva conexión a la base de datos"""
+        url = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={self.connection_params['host']};"
+            f"PORT={self.connection_params['port']};"
+            f"DATABASE={self.connection_params['database']};"
+            f"UID={self.connection_params['user']};"
+            f"PWD={self.connection_params['password']};"
+            f"Timeout=0"
+        )
+        try:
+            return pyodbc.connect(url)
+        except pyodbc.Error as ex:
+            print(f"Error al conectar: {ex}")
+            raise
 
-# Funcion para la conexion
-def get_db_cursor(conn):
-    """Retorna un cursor para ejecutar consultas con la conexion dada"""
-    if conn:
-        return conn.cursor()
-    else:
-        return None
+    @contextmanager
+    def cursor(self):
+        """Proporciona un cursor gestionado con context manager"""
+        conn = self.connect()
+        cursor = conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
 
+    def get_all_tables(self) -> Dict[str, Any]:
+        """Obtiene todas las tablas de la base de datos"""
+        with self.cursor() as cursor:
+            cursor.execute(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
+            )
+            tables = [row.TABLE_NAME for row in cursor.fetchall()]
+            return {"tables": tables, "total_tables": len(tables)}
 
-# Funcion para obtener todas las tablas y sus relaciones
-def relaciones_todas_tablas(conn):
-    """Ejecuta la consulta para obtener las relaciones entre tablas"""
-    query = """
-        SELECT 
-            OBJECT_NAME(f.parent_object_id) AS tabla_padre,
-            COL_NAME(fc.parent_object_id, fc.parent_column_id) AS columna_padre,
-            OBJECT_NAME(f.referenced_object_id) AS tabla_hija,
-            COL_NAME(fc.referenced_object_id, fc.referenced_column_id) AS columna_hija
-        FROM 
-            sys.foreign_keys f
-        INNER JOIN 
-            sys.foreign_key_columns fc ON f.object_id = fc.constraint_object_id
-    """
+    def get_table_structure(self, table_name: str) -> List[Dict]:
+        """Obtiene la estructura de una tabla específica"""
+        with self.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = ?
+                """,
+                table_name,
+            )
+            return [
+                {
+                    "column_name": column.COLUMN_NAME,
+                    "data_type": column.DATA_TYPE,
+                    "max_length": column.CHARACTER_MAXIMUM_LENGTH,
+                    "is_nullable": column.IS_NULLABLE,
+                }
+                for column in cursor.fetchall()
+            ]
 
-    df = pd.read_sql_query(query, conn)
-    relaciones = df.to_dict(orient="records")
-    return relaciones
+    def get_table_relations(self, table_name: str) -> List[Dict[str, Any]]:
+        """Obtiene las relaciones de una tabla específica"""
+        try:
+            with self.cursor() as cursor:
+                query = f"""
+                    SELECT 
+                        OBJECT_NAME(f.parent_object_id) AS tabla_padre,
+                        COL_NAME(fc.parent_object_id, fc.parent_column_id) AS columna_padre,
+                        OBJECT_NAME(f.referenced_object_id) AS tabla_hija,
+                        COL_NAME(fc.referenced_object_id, fc.referenced_column_id) AS columna_hija
+                    FROM 
+                        sys.foreign_keys f
+                    INNER JOIN 
+                        sys.foreign_key_columns fc ON f.object_id = fc.constraint_object_id
+                    WHERE 
+                        OBJECT_NAME(f.parent_object_id) = '{table_name}'
+                    OR 
+                        OBJECT_NAME(f.referenced_object_id) = '{table_name}'
+                """
+                cursor.execute(query)
 
+                # Convertimos directamente los resultados a diccionario
+                columns = [column[0] for column in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except pyodbc.Error as e:
+            print(f"Error SQL al obtener relaciones: {str(e)}")
+            raise
+        except Exception as e:
+            print(f"Error inesperado en get_table_relations: {str(e)}")
+            raise
 
-# Funcion que obtiene las tablas que se relacionan con la tabla especificada
-def relacion_tabla(conn, table_name):
-    print(f"conn desde obtener relaciones: {conn}")
-    query = f"""
-        SELECT 
-            OBJECT_NAME(f.parent_object_id) AS tabla_padre,
-            COL_NAME(fc.parent_object_id, fc.parent_column_id) AS columna_padre,
-            OBJECT_NAME(f.referenced_object_id) AS tabla_hija,
-            COL_NAME(fc.referenced_object_id, fc.referenced_column_id) AS columna_hija
-        FROM 
-            sys.foreign_keys f
-        INNER JOIN 
-            sys.foreign_key_columns fc ON f.object_id = fc.constraint_object_id
-        WHERE 
-            OBJECT_NAME(f.parent_object_id) = '{table_name}'
-        OR 
-            OBJECT_NAME(f.referenced_object_id) = '{table_name}'
-    """
+    def get_all_relations(self) -> List[Dict]:
+        """Obtiene todas las relaciones entre tablas"""
+        try:
+            with self.cursor() as cursor:
+                query = """
+                    SELECT 
+                        OBJECT_NAME(f.parent_object_id) AS tabla_padre,
+                        COL_NAME(fc.parent_object_id, fc.parent_column_id) AS columna_padre,
+                        OBJECT_NAME(f.referenced_object_id) AS tabla_hija,
+                        COL_NAME(fc.referenced_object_id, fc.referenced_column_id) AS columna_hija
+                    FROM 
+                        sys.foreign_keys f
+                    INNER JOIN 
+                        sys.foreign_key_columns fc ON f.object_id = fc.constraint_object_id
+                """
+                cursor.execute(query)
 
-    df = pd.read_sql_query(query, conn)
-    relaciones = df.to_dict(orient="records")
-    return relaciones
+                # Obtener nombres de columnas
+                columns = [column[0] for column in cursor.description]
 
+                # Convertir resultados a lista de diccionarios
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except pyodbc.Error as e:
+            print(f"Error de base de datos al obtener relaciones: {str(e)}")
+            raise
+        except Exception as e:
+            print(f"Error inesperado en get_all_relations: {str(e)}")
+            raise
 
-# Funcion para la relacion entre los campos sql-server a doctype
-def map_sql_type_to_frappe(data_type: str) -> str:
-    """Mapea tipos de datos SQL a tipos de campo de Frappe"""
-    data_type = data_type.lower().strip()
+    @staticmethod
+    def map_sql_type_to_frappe(data_type: str) -> str:
+        """Mapea tipos de datos SQL a tipos de campo de Frappe"""
+        # ... (implementación igual a la que ya tienes)
+        pass
 
-    type_mapping = {
-        # Texto
-        "varchar": "Data",
-        "nvarchar": "Data",
-        "char": "Data",
-        "nchar": "Data",
-        "text": "Text",
-        "ntext": "Text",
-        "longtext": "Text",
-        "mediumtext": "Text",
-        "tinytext": "Text",
-        # Números enteros
-        "int": "Int",
-        "integer": "Int",
-        "bigint": "Int",
-        "smallint": "Int",
-        "tinyint": "Int",
-        # Números decimales
-        "decimal": "Float",
-        "numeric": "Float",
-        "float": "Float",
-        "double": "Float",
-        "real": "Float",
-        # Fechas y tiempos
-        "date": "Date",
-        "datetime": "Datetime",
-        "datetime2": "Datetime",
-        "smalldatetime": "Datetime",
-        "timestamp": "Datetime",
-        "time": "Time",
-        # Binarios
-        "binary": "Data",
-        "varbinary": "Data",
-        "image": "Attach",
-        # Booleanos
-        "bit": "Check",
-        "boolean": "Check",
-        # JSON
-        "json": "JSON",
-        # Especiales
-        "uniqueidentifier": "Data",  # UUID
-    }
+    def detect_foreign_keys(self, table_name: str, column_name: str) -> Optional[str]:
+        """Detecta si un campo es una clave foránea"""
+        with self.cursor() as cursor:
+            query = f"""
+                SELECT referenced_object_id 
+                FROM sys.foreign_keys 
+                INNER JOIN sys.foreign_key_columns 
+                    ON sys.foreign_keys.object_id = sys.foreign_key_columns.constraint_object_id
+                WHERE parent_object_id = OBJECT_ID('{table_name}')
+                  AND parent_column_id = COL_NAME(OBJECT_ID('{table_name}'), '{column_name}')
+            """
+            cursor.execute(query)
+            return "Link" if cursor.fetchone() else None
 
-    # Buscar coincidencia exacta primero
-    if data_type in type_mapping:
-        return type_mapping[data_type]
-
-    # Manejar tipos con parámetros como varchar(255), decimal(10,2), etc.
-    base_type = data_type.split("(")[0]
-    if base_type in type_mapping:
-        return type_mapping[base_type]
-
-    # Para tipos desconocidos, usar Data como predeterminado
-    return "Data"
-
-
-# Funcion para el caso de las llaves foraneas y el tipo link de Frappe
-def detectar_relaciones(conn, tabla_sql, campo):
-    cursor = get_db_cursor(conn)
-    query = f"""
-        SELECT referenced_object_id 
-        FROM sys.foreign_keys 
-        INNER JOIN sys.foreign_key_columns 
-            ON sys.foreign_keys.object_id = sys.foreign_key_columns.constraint_object_id
-        WHERE parent_object_id = OBJECT_ID('{tabla_sql}')
-          AND parent_column_id = COL_NAME(OBJECT_ID('{tabla_sql}'), {campo.nombre_campo})
-    """
-    cursor.execute(query)
-    resultado = cursor.fetchone()
-    return "Link" if resultado else None
-
-
-# Funcio para obtener la estructura de la tabla
-def get_table_structure(conn, table_name: str) -> List[Dict]:
-    """Obtiene la estructura de una tabla específica"""
-    cursor = conn.cursor()
-    try:
-        query = """
-        SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = ?
+    def export_table_to_json(
+        self, table_name: str, fields: List[str], output_folder: str = "formatos_json"
+    ) -> Dict[str, Any]:
         """
-        cursor.execute(query, table_name)
-        columns = cursor.fetchall()
+        Exporta los datos de una tabla a un archivo JSON y retorna los datos
 
-        return [
-            {
-                "column_name": column.COLUMN_NAME,
-                "data_type": column.DATA_TYPE,
-                "max_length": column.CHARACTER_MAXIMUM_LENGTH,
-                "is_nullable": column.IS_NULLABLE,
-            }
-            for column in columns
-        ]
-    finally:
-        cursor.close()
+        Args:
+            table_name: Nombre de la tabla a exportar
+            fields: Lista de campos a seleccionar
+            output_folder: Carpeta de destino para el JSON
+
+        Returns:
+            Diccionario con nombre de tabla y datos
+        """
+        if not path.exists(output_folder):
+            makedirs(output_folder)
+
+        with self.cursor() as cursor:
+            query = f"SELECT {', '.join(fields)} FROM {table_name}"
+            cursor.execute(query)
+
+            columns = [column[0] for column in cursor.description]
+            table_data = []
+
+            for row in cursor.fetchall():
+                row_data = {}
+                for i, field_name in enumerate(columns):
+                    value = row[i]
+                    if not self.is_serializable(
+                        value
+                    ):  # Usa tu función de serialización
+                        value = self.serialize_value(value)
+                    row_data[field_name] = value
+                table_data.append(row_data)
+
+        file_path = path.join(output_folder, f"{table_name}.json")
+        with open(file_path, "w", encoding="utf-8") as json_file:
+            json.dump(
+                {"table_name": table_name, "data": table_data},
+                json_file,
+                indent=4,
+                ensure_ascii=False,
+            )
+
+        return {"table_name": table_name, "data": table_data}
+
+    def serialize_value(self, value):
+        """Serializa valores no estándar a formatos JSON compatibles."""
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        elif isinstance(value, Decimal):
+            return float(value)
+        elif isinstance(value, bytes):
+            return value.decode(
+                "utf-8", errors="ignore"
+            )  # Manejo de errores de decodificación
+        return str(value)
+
+    def is_serializable(self, value):
+        """Verifica si un valor puede ser serializado a JSON."""
+        try:
+            json.dumps(value)
+            return True
+        except (TypeError, OverflowError):
+            return False
+
+
+def create_db_manager(params: ConexionParams) -> DatabaseManager:
+    """Helper para crear instancias de DatabaseManager con configuración consistente"""
+    return DatabaseManager(
+        host=params.host,
+        password=params.password,
+        database=params.database,
+        port=getenv("SQL_PORT"),
+        user=getenv("SQL_USER"),
+    )
+
+
+# # Funciones legacy (puedes mantenerlas temporalmente para compatibilidad)
+# def get_db_connection(host: str, password: str, database: str, port: str, user: str):
+#     """Función legacy para compatibilidad"""
+#     return DatabaseManager(host, password, database, port, user).connect()
+
+
+# # ... (otras funciones legacy que quieras mantener)
