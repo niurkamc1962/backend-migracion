@@ -29,10 +29,9 @@ if allow_all_origins:
 elif frontend_domain == "http://localhost":
     origins.extend(
         [
+            "http://localhost:3000",
             "http://localhost:8000",
             "http://localhost:8080",
-            "http://localhost:9000",
-            "http://localhost:9006",
         ]
     )
     if getenv("ENVIRONMENT", "production") == "development":
