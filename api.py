@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from os import getenv
 from db.database import DatabaseManager, create_db_manager
-from db.models import ConexionParams, Payload
+from db.models import ConexionParams, GenerateDoctype, Payload
 import pyodbc
 import json
 
@@ -124,3 +124,16 @@ async def get_all_relation_endpoint(params: ConexionParams):
             return db.get_all_relations()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-doctype-json/{table_name}", tags=["Database"])
+async def generate_doctype_json(table_name: str, payload: GenerateDoctype):
+    try:
+        with create_db_manager(payload.params) as db:
+            return db.generate_doctype_json(table_name, payload)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al generar el JSON para {table_name}: {str(e)}"
+        )
+

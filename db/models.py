@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional, Dict, Any
 
 
 class ConexionParams(BaseModel):
@@ -33,3 +33,12 @@ class TablaSQL(BaseModel):
 class Payload(BaseModel):
     params: ConexionParams
     fields: List[Campo]
+    
+
+# Modelo para el endpoint de generar Doctype JSON
+class GenerateDoctype(BaseModel):
+    params: ConexionParams
+    fields: List[Campo]
+    module: Optional[str] = "Custom"
+    is_child_table: Optional[bool] = False
+    # custom_fields: Optional[List[Dict[str, Any]]] = None

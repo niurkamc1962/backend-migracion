@@ -4,10 +4,12 @@ import pyodbc
 import pandas as pd
 from typing import Optional, Dict, List, Any
 from contextlib import contextmanager
-from db.models import ConexionParams
+from db.models import ConexionParams, Payload
 import json
 from datetime import datetime, date
 from decimal import Decimal
+import re  # para usar expresiones regulares
+
 
 load_dotenv()
 
@@ -162,31 +164,11 @@ class DatabaseManager:
             print(f"Error inesperado en get_all_relations: {str(e)}")
             raise
 
-    @staticmethod
-    def map_sql_type_to_frappe(data_type: str) -> str:
-        """Mapea tipos de datos SQL a tipos de campo de Frappe"""
-        # ... (implementación igual a la que ya tienes)
-        pass
-
-    def detect_foreign_keys(self, table_name: str, column_name: str) -> Optional[str]:
-        """Detecta si un campo es una clave foránea"""
-        with self.cursor() as cursor:
-            query = f"""
-                SELECT referenced_object_id 
-                FROM sys.foreign_keys 
-                INNER JOIN sys.foreign_key_columns 
-                    ON sys.foreign_keys.object_id = sys.foreign_key_columns.constraint_object_id
-                WHERE parent_object_id = OBJECT_ID('{table_name}')
-                  AND parent_column_id = COL_NAME(OBJECT_ID('{table_name}'), '{column_name}')
-            """
-            cursor.execute(query)
-            return "Link" if cursor.fetchone() else None
-
     def export_table_to_json(
         self, table_name: str, fields: List[str], output_folder: str = "formatos_json"
     ) -> Dict[str, Any]:
         """
-        Exporta los datos de una tabla a un archivo JSON y retorna los datos
+        Exporta los datos de una tabla SQL a un archivo JSON
 
         Args:
             table_name: Nombre de la tabla a exportar
@@ -247,6 +229,152 @@ class DatabaseManager:
             return True
         except (TypeError, OverflowError):
             return False
+
+    @staticmethod
+    def map_sql_type_to_frappe(sql_type: str) -> str:
+        """Mapea tipos de campo SQL a tipos de campo en Frappe"""
+        mapping = {
+            "varchar": "Data",
+            "nvarchar": "Data",
+            "char": "Data",
+            "text": "Text",
+            "ntext": "Text",
+            "int": "Int",
+            "smallint": "Int",
+            "bigint": "Int",
+            "decimal": "Float",
+            "numeric": "Float",
+            "float": "Float",
+            "real": "Float",
+            "date": "Date",
+            "datetime": "Datetime",
+            "datetime2": "Datetime",
+            "smalldatetime": "Datetime",
+            "time": "Time",
+            "bit": "Check",
+            "tinyint": "Int",
+            "binary": "Data",
+            "varbinary": "Data",
+            "uniqueidentifier": "Data",
+        }
+        return mapping.get(sql_type.lower(), "Data")
+
+    def generate_doctype_json(
+        self, table_name: str, payload: Payload, output_folder: str = "formatos_json"
+    ) -> dict:
+        """Genera el formato Doctype JSON para la tabla especificada"""
+        print("Entre en generate_dcotype_json")
+        doctype_json = {
+            "module": payload.module,
+            "name": table_name.lower(),
+            "nsm_parent_field": "",
+            "owner": "Administrator",
+            "actions": [],
+            "allow_events_in_timeline": 1,
+            "allow_import": 1,
+            "allow_rename": 1,
+            "autoname": "",
+            "creation": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
+            "description": "",
+            "doctype": "DocType",
+            "document_type": "Setup",
+            "engine": "InnoDB",
+            "field_order": [],
+            "permissions": [
+                {
+                    "role": "System Manager",
+                    "permlevel": 0,
+                    "read": 1,
+                    "write": 1,
+                    "create": 1,
+                    "delete": 1,
+                    "report": 1,
+                }
+            ],
+            "fields": [],  # inicializa la lista de campos
+            "is_child_table": (
+                payload.is_child_table if payload.is_child_table is not None else False
+            ),
+        }
+
+        # Procesa los campos  SQL que se pasan en el payload
+        fields = []
+        for field in payload.fields:
+            print(f"entre en field: {field}")
+            field_data = self._process_field(field)
+            doctype_json["fields"].append(field_data)
+            doctype_json["field_order"].append(field_data["fieldname"])
+
+        # Salvando archivo doctype
+        file_path = path.join(output_folder, f"doctype_{table_name}.json")
+        try:
+            with open(file_path, "w", encoding="utf-8") as json_file:
+                json.dump(doctype_json, json_file, indent=4, ensure_ascii=False)
+            print(f"Doctype guardado en: {file_path}")
+        except Exception as e:
+            print(f"Error al guardar el archivo: {e}")
+            return {"table_name": table_name, "error": str(e)}
+
+
+    def _process_field(self, field: Any) -> Dict[str, Any]:
+        """Procesa un campo individual para determinar su tipo y nombre."""
+        # Lista de tipos de campo válidos en Frappe (puedes ampliarla)
+        valid_frappe_fieldtypes = [
+            "Data",
+            "Text",
+            "Int",
+            "Float",
+            "Date",
+            "Datetime",
+            "Time",
+            "Check",
+            "Link",
+            "Select",
+            # Agrega más tipos de campo válidos aquí
+        ]
+        print("entre en _process_field con {field}")
+        # Determinar el tipo de campo
+        if field.tipo_campo_erp:
+            print(f"field ERP: {field.tipo_campo_erp}")
+            if field.tipo_campo_erp in valid_frappe_fieldtypes:
+                fieldtype = field.tipo_campo_erp  # Usar directamente tipo_campo_erp
+            else:
+                print(
+                    f"Advertencia: tipo_campo_erp '{field.tipo_campo_erp}' no es un tipo de campo válido en Frappe. Mapeando tipo_campo en su lugar que es '{field.tipo_campo}'."
+                )
+                fieldtype = self.map_sql_type_to_frappe(
+                    field.tipo_campo
+                )  # Mapear tipo_campo
+        else:
+            print(f"tipo_campo: {field.tipo_campo}")
+            fieldtype = self.map_sql_type_to_frappe(
+                field.tipo_campo
+            )  # Mapear tipo_campo
+
+        # Determinar el nombre del campo
+        if field.nombre_campo_erp:
+            print(f"entre por nombre_campo_erp: {field.nombre_campo_erp}")
+            fieldname = field.nombre_campo_erp.lower()
+            fieldlabel = field.nombre_campo_erp
+        else:
+            # Usar nombre_campo y convertirlo a formato de Frappe
+            print(f"nombre_campo: {field.nombre_campo}")
+            fieldname = self.format_frappe_fieldname(field.nombre_campo)
+            fieldlabel = field.nombre_campo
+
+        return {
+            "fieldname": fieldname,
+            "label": fieldlabel,
+            "fieldtype": fieldtype,
+            "reqd": field.obligatorio,
+        }
+
+
+    def format_frappe_fieldname(self, field_name: str) -> str:
+        """Convierte un nombre de campo a formato Frappe (snake_case)"""
+        s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", field_name)
+        return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
 
 
 def create_db_manager(params: ConexionParams) -> DatabaseManager:
